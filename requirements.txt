@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+streamlit
+requests
+python-dotenv
+langchain
+langchain-community
+langchain-core
+langchain-openai
+langchain-text-splitters
+langgraph
+langchain-mcp-adapters
+faiss-cpu
+pypdf
+duckduckgo-search
