@@ -7,8 +7,10 @@ import asyncio
 from typing import List, Dict, Any, Type
 from langchain_core.vectorstores import VectorStoreRetriever
 from pydantic import PrivateAttr
-from langchain_core.documents import Document 
+from langchain_core.documents import Document
+from src.core.logger import get_logger
 
+logger = get_logger(__name__)
 class SearchTool:
     def __init__(self):
         # keep the duckduckgo tool instance on the object
@@ -80,7 +82,7 @@ class RAGTool(BaseTool):
 
     async def _arun(self, query: str, **kwargs: Any) -> dict:
         """Use the tool asynchronously."""
-        print(f"--- RAGTool searching for: '{query}' ---")        
+        logger.info(f"RAGTool searching for: '{query}'")
         retriever = kwargs["retriever"]
         result: List[Document] = await retriever.ainvoke(query)
         context = [doc.page_content for doc in result]

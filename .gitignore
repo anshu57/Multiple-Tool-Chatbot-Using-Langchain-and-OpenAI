@@ -129,6 +129,9 @@ venv.bak/
 .spyderproject
 .spyproject
 
+# Log files
+logs/
+
 # Rope project settings
 .ropeproject
 

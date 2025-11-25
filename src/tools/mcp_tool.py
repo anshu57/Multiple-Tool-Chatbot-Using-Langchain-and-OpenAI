@@ -3,7 +3,9 @@ import asyncio
 from typing import List, Any
 from langchain_core.tools import StructuredTool
 from src.core.mcp_client import MCPClient
+from src.core.logger import get_logger
 
+logger = get_logger(__name__)
 class RemoteMCPTools:
     """Wrapper for MCP tools as LangChain StructuredTools (async-friendly)."""
     
@@ -29,51 +31,19 @@ class RemoteMCPTools:
                 mcp_client = MCPClient()
         return cls(mcp_client)
     
-    def _make_langchain_tool(self, mcp_tool) -> StructuredTool:
-        """Convert MCP tool to LangChain StructuredTool.
-
-        Note: bind mcp_tool into the coroutine default arg to avoid late-binding.
-        Makes query parameter optional since some tools don't need it.
-        """
-        tool_name = mcp_tool.name
-        tool_description = mcp_tool.description or "MCP tool"
-        
-        async def run_tool(query: str = "", *, _mcp_tool = mcp_tool) -> Any:
-            """Run the MCP tool asynchronously.
-            
-            Args:
-                query: Optional query parameter (defaults to empty string if not provided).
-            """
-            try:
-                # Build args: include query if provided, otherwise pass empty args
-                args = {"query": query} if query else {}
-                # assume MCPClient.run_tool is async; await it
-                result = await self.mcp_client.run_tool(_mcp_tool, args)
-                return result
-            except Exception as e:
-                return f"Error: {e}"
-        
-        return StructuredTool.from_function(
-            coroutine=run_tool,
-            name=tool_name,
-            description=tool_description
-        )
-    
     async def load_tools(self) -> List[StructuredTool]:
-        """Load all MCP tools and convert them to LangChain StructuredTools (async)."""
+        """Load all MCP tools as LangChain StructuredTools (async).
+        
+        MCP tools from langchain_mcp_adapters are already StructuredTools
+        with proper schemas, so we return them directly.
+        """
         try:
-            # Get raw MCP tools (awaiting async get_tools)
+            # Get MCP tools - they're already LangChain StructuredTools with proper schemas
             mcp_tools = await self.mcp_client.get_tools()
-            
-            # Convert to LangChain tools
-            langchain_tools: List[StructuredTool] = []
-            for mcp_tool in mcp_tools:
-                lc_tool = self._make_langchain_tool(mcp_tool)
-                langchain_tools.append(lc_tool)
-            return langchain_tools
+            return mcp_tools
      
         except Exception as e:
-            print(f"Failed to load tools: {e}")
+            logger.error(f"Failed to load MCP tools: {e}")
             return []
 
     def load_tools_sync(self) -> List[StructuredTool]:

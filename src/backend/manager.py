@@ -1,6 +1,7 @@
 import asyncio
 import os
 from typing import List, Annotated, Dict, Any
+from fastapi import UploadFile
 from typing_extensions import TypedDict
 from langchain_core.messages import AnyMessage, SystemMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.vectorstores import VectorStoreRetriever
@@ -11,8 +12,10 @@ from src.core.llm_provider import ChatModelProvider
 from src.tools.local_tools import RAGTool, StockPriceTool, SearchTool
 from src.core.vector_store import VectorStoreManager
 from src.core.tools_manager import ToolsManager
+from src.core.logger import get_logger
 
 
+logger = get_logger(__name__)
 class AgentState(TypedDict):
     """
     Represents the state of our LangGraph agent.
@@ -90,19 +93,16 @@ class ChatbotManager:
         
         return inst
 
-    async def add_document_to_thread(self, thread_id: str, pdf_path: str) -> None:
+    async def add_document_to_thread(self, thread_id: str, file: UploadFile) -> None:
         """
         Creates a retriever for a given PDF and associates it with a thread_id.
         """
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"PDF file not found at {pdf_path}")
-
         manager = VectorStoreManager()
-        retriever = await manager.create_from_pdf(pdf_path)
+        retriever = await manager.create_from_upload(file)
         
         self._thread_retrievers[thread_id] = retriever
-        self._thread_metadata[thread_id] = {"filename": os.path.basename(pdf_path)}
-        print(f"Associated PDF '{os.path.basename(pdf_path)}' with thread_id '{thread_id}'.")
+        self._thread_metadata[thread_id] = {"filename": file.filename}
+        logger.info(f"Associated PDF '{file.filename}' with thread_id '{thread_id}'.")
 
     def _build_graph(self) -> StateGraph:
         """
@@ -145,13 +145,13 @@ class ChatbotManager:
         """
         # Debug: inspect the messages we're about to send to the model
         try:
-            print("[DEBUG][_call_model] messages about to be sent:")
+            logger.debug("[_call_model] Messages about to be sent to LLM:")
             for i, m in enumerate(state["messages"]):
                 t = type(m).__name__
                 tool_calls = getattr(m, "tool_calls", None)
-                print(f"  index={i} type={t} id={getattr(m, 'id', None)} tool_calls={tool_calls}")
+                logger.debug(f"  index={i} type={t} id={getattr(m, 'id', None)} tool_calls={tool_calls}")
         except Exception as e:
-            print("[DEBUG][_call_model] failed to stringify messages:", e)
+            logger.warning(f"[_call_model] Failed to stringify messages for debugging: {e}")
 
         response = await self.llm_with_tools.ainvoke(state["messages"])
 
@@ -199,7 +199,7 @@ class ChatbotManager:
             # find the tool by comparing names (defensive getattr)
             tool_to_call = next((t for t in self.tools if getattr(t, "name", None) == tc_name), None)
 
-            print(f"[DEBUG][_call_tool] handling tool_call id={tc_id} name={tc_name} args={tc_args}")
+            logger.debug(f"[_call_tool] Handling tool_call id={tc_id} name={tc_name} args={tc_args}")
             if not tool_to_call:
                 output = f"Error: Tool '{tc_name}' not found."
             else:

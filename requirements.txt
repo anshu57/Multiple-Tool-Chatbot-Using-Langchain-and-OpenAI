@@ -13,3 +13,5 @@ langchain-mcp-adapters
 faiss-cpu
 pypdf
 duckduckgo-search
+werkzeug
+python-multipart

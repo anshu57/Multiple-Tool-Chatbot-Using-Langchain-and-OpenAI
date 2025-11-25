@@ -1,5 +1,6 @@
 import asyncio
 from typing import List, Dict, Any
+from .logger import get_logger
 
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -8,13 +9,14 @@ except ImportError:
     HAS_MCP = False
     MultiServerMCPClient = None
 
+logger = get_logger(__name__)
 
 class MCPClient:
     
     def __init__(self):
         """Initialize the MCP client with server configuration."""
         if not HAS_MCP:
-            print("Warning: langchain_mcp_adapters not installed. MCP tools will not be available.")
+            logger.warning("langchain_mcp_adapters not installed. MCP tools will not be available.")
             self.client = None
             return
         
@@ -33,7 +35,7 @@ class MCPClient:
         }
     )
         except Exception as e:
-            print(f"Warning: Failed to initialize MCP client: {e}")
+            logger.warning(f"Failed to initialize MCP client: {e}")
             self.client = None
     
     async def get_tools(self) -> List[Any]:
@@ -44,7 +46,7 @@ class MCPClient:
             tools = await self.client.get_tools()
             return tools
         except Exception as e:
-            print(f"Error getting tools: {e}")
+            logger.error(f"Error getting tools: {e}")
             return []
     
     async def run_tool(self, tool, args: Dict[str, Any]) -> str:

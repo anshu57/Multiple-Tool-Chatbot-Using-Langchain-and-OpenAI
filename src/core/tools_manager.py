@@ -1,7 +1,9 @@
 from typing import List, Optional, Any
 from src.tools.local_tools import SearchTool, StockPriceTool, RAGTool
+from .logger import get_logger
 import asyncio
 
+logger = get_logger(__name__)
 
 class ToolsManager:
     """Async-first manager for local and MCP tools."""
@@ -44,7 +46,7 @@ class ToolsManager:
                 mcp_tools = await self._remote_mgr.load_tools()
                 tools.extend(mcp_tools)
             except Exception as e:
-                print(f"Failed to load MCP tools: {e}")
+                logger.error(f"Failed to load MCP tools: {e}")
         return tools
 
     def get_all_tools_sync(self) -> List[Any]:

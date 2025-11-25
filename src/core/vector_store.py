@@ -1,4 +1,6 @@
 import os
+import tempfile
+from fastapi import UploadFile
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -58,3 +60,28 @@ class VectorStoreManager:
         # 4. Create an in-memory FAISS vector store and return a retriever
         vector_store = FAISS.from_documents(documents, embeddings)
         return vector_store.as_retriever()
+
+    async def create_from_upload(self, file: UploadFile) -> VectorStoreRetriever:
+        """
+        Asynchronously creates a temporary in-memory vector store from an uploaded file.
+
+        Args:
+            file: The uploaded file object from FastAPI.
+
+        Returns:
+            A LangChain VectorStoreRetriever instance ready for querying.
+        """
+        # Use a temporary file to store the uploaded content
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            # Use the existing method to process the file from its temporary path
+            retriever = await self.create_from_pdf(tmp_path)
+            return retriever
+        finally:
+            # Ensure the temporary file is cleaned up
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)

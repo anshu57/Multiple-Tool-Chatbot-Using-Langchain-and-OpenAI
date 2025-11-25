@@ -9,9 +9,8 @@ import streamlit as st
 import requests
 import json
 import uuid
-from datetime import datetime
-from typing import Generator
-import time
+from datetime import datetime, timezone
+from werkzeug.utils import secure_filename
 import os
 
 # Page configuration
@@ -90,10 +89,20 @@ st.markdown("""
 # API Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
-# Initialize session state
-if "thread_id" not in st.session_state:
-    st.session_state.thread_id = str(uuid.uuid4())
-    st.session_state.messages = []
+# --- Session State Management ---
+def initialize_session_state():
+    """Initializes the session state for chat history."""
+    if "chats" not in st.session_state:
+        st.session_state.chats = {}
+        # Create a default first chat
+        first_thread_id = str(uuid.uuid4())
+        st.session_state.chats[first_thread_id] = {
+            "title": "New Chat",
+            "messages": [],
+            "thread_id": first_thread_id
+        }
+        st.session_state.active_thread_id = first_thread_id
+initialize_session_state()
 
 # Simple Header
 st.title("🤖 LangGraph Chatbot")
@@ -101,42 +110,50 @@ st.caption("Chat with an intelligent agent powered by LangGraph and MCP tools")
 
 st.divider()
 
-# Sidebar with PDF Upload and New Chat
+# --- Sidebar ---
 with st.sidebar:
     st.header("☰ Menu")
     
-    # New Chat Button at top
-    if st.button("� New Chat", use_container_width=True):
-        st.session_state.thread_id = str(uuid.uuid4())
-        st.session_state.messages = []
+    # New Chat Button
+    if st.button("🆕 New Chat", use_container_width=True):
+        new_thread_id = str(uuid.uuid4())
+        st.session_state.chats[new_thread_id] = {
+            "title": "New Chat",
+            "messages": [],
+            "thread_id": new_thread_id
+        }
+        st.session_state.active_thread_id = new_thread_id
         st.rerun()
     
     st.divider()
+
+    # Chat History
+    st.subheader("📜 Chat History")
+    for thread_id, chat_info in reversed(list(st.session_state.chats.items())):
+        if st.button(chat_info["title"], key=f"chat_{thread_id}", use_container_width=True):
+            st.session_state.active_thread_id = thread_id
+            st.rerun()
     
-    st.subheader("📁 Upload PDF")
+    st.divider()
+    
+    st.subheader("� Upload PDF")
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
     
     if uploaded_file is not None:
-        # Save uploaded file
-        temp_path = f"temp_files/{uploaded_file.name}"
-        os.makedirs("temp_files", exist_ok=True)
-        
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        
-        st.success(f"✓ Uploaded: {uploaded_file.name}")
-        
-        # Associate with thread
         try:
+            # Send the file content directly to the backend
+            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
             response = requests.post(
-                f"{API_BASE_URL}/upload-pdf/{st.session_state.thread_id}",
-                params={"pdf_path": temp_path},
+                f"{API_BASE_URL}/upload-pdf/{st.session_state.active_thread_id}",
+                files=files,
                 timeout=30
             )
             if response.status_code == 200:
+                st.success(f"✓ Uploaded: {uploaded_file.name}")
                 st.info("✓ PDF associated with conversation")
             else:
-                st.error(f"Failed to upload PDF: {response.status_code}")
+                error_detail = response.json().get("detail", "Unknown error")
+                st.error(f"Failed to upload PDF: {response.status_code} - {error_detail}")
         except Exception as e:
             st.error(f"Error uploading PDF: {str(e)}")
     
@@ -153,14 +170,14 @@ with st.sidebar:
     except:
         st.error("✗ Cannot connect to API")
 
-# Main Chat Area
-if st.session_state.messages:
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            st.markdown(f'<div class="message-user"><b>You:</b> {msg["content"]}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="message-assistant"><b>Bot:</b> {msg["content"]}</div>', unsafe_allow_html=True)
-else:
+# --- Main Chat Area ---
+active_chat = st.session_state.chats[st.session_state.active_thread_id]
+
+# Display existing messages
+for msg in active_chat["messages"]:
+    st.chat_message(msg["role"]).write(msg["content"])
+
+if not active_chat["messages"]:
     st.info("👋 Start a conversation by typing a message below!")
 
 # Add spacer at bottom
@@ -169,80 +186,63 @@ st.write("")
 st.write("")
 st.write("")
 
-# Fixed Input at Bottom using columns
-st.markdown('<div class="input-container">', unsafe_allow_html=True)
-
-# Create form for Enter key support
-with st.form(key="message_form", clear_on_submit=True):
-    col1, col2 = st.columns([5, 1])
-    
-    with col1:
-        user_input = st.text_input(
-            "Message:",
-            placeholder="Type your message and press Enter...",
-            label_visibility="collapsed",
-            key="message_input"
+def stream_response(user_input: str):
+    """Stream response from API and yield content chunks."""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/chat/{st.session_state.active_thread_id}",
+            params={"message": user_input.strip()},
+            stream=True,
+            timeout=120
         )
-    
-    with col2:
-        submit = st.form_submit_button("Send", use_container_width=True)
-    
-    # Handle message submission
-    if submit and user_input.strip():
-        # Add user message to history
-        st.session_state.messages.append({
-            "role": "user",
-            "content": user_input,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # Stream response from API
-        try:
-            with st.spinner("🤔 Thinking..."):
-                response = requests.get(
-                    f"{API_BASE_URL}/chat/{st.session_state.thread_id}",
-                    params={"message": user_input.strip()},
-                    stream=True,
-                    timeout=120
-                )
-                
-                if response.status_code == 200:
-                    # Collect streamed response
-                    full_response = ""
-                    
-                    for line in response.iter_lines():
-                        if line:
-                            try:
-                                # Parse Server-Sent Event format
-                                if line.startswith(b"data: "):
-                                    data = json.loads(line[6:])
-                                    chunk = data.get("content", "")
-                                    full_response += chunk
-                            except json.JSONDecodeError:
-                                continue
-                    
-                    # Add assistant response to history
-                    if full_response:
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": full_response,
-                            "timestamp": datetime.now().isoformat()
-                        })
-                    else:
-                        st.warning("⚠️ No response from server")
-                else:
-                    st.error(f"⚠️ API Error: {response.status_code}")
-        
-        except requests.exceptions.Timeout:
-            st.error("⏱️ Request timeout")
-        except requests.exceptions.ConnectionError:
-            st.error(f"❌ Cannot connect to API")
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
-        
-        st.rerun()
+        response.raise_for_status()  # Raise an exception for bad status codes
 
-st.markdown('</div>', unsafe_allow_html=True)
+        for line in response.iter_lines():
+            if line and line.startswith(b"data: "):
+                try:
+                    data = json.loads(line[6:])
+                    yield data.get("content", "")
+                except json.JSONDecodeError:
+                    continue
+
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Request timeout")
+        yield ""
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ API Error: {e}")
+        yield ""
+    except Exception as e:
+        st.error(f"❌ An unexpected error occurred: {e}")
+        yield ""
+
+# Fixed Input at Bottom
+if user_input := st.chat_input("Type your message..."):
+    # If this is the first message in a "New Chat", create a title
+    if active_chat["title"] == "New Chat" and not active_chat["messages"]:
+        # Generate a title from the first 5 words of the user's message
+        title = " ".join(user_input.split()[:5])
+        active_chat["title"] = title if title else "Chat"
+
+    # Add user message to history and display it immediately
+    active_chat["messages"].append({
+        "role": "user",
+        "content": user_input,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    st.rerun() # Rerun to show the user message and update the history list
+
+# The logic to get the bot's response should only run if the last message was from the user
+if active_chat["messages"] and active_chat["messages"][-1]["role"] == "user":
+    last_user_message = active_chat["messages"][-1]["content"]
+    with st.chat_message("assistant"):
+        full_response = st.write_stream(stream_response(last_user_message))
+    
+    if full_response:
+        active_chat["messages"].append({
+            "role": "assistant",
+            "content": full_response,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
 
 # Footer
 st.caption("🤖 LangGraph Chatbot v2.0 | Powered by OpenAI, LangGraph & MCP")
